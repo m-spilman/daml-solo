@@ -1,0 +1,217 @@
+
+
+module Property where
+
+import Bank
+import Daml.Script
+import DA.Time
+
+template ProposeMintProperty
+    with
+     requestor: Party
+     admin: Party
+    where
+     signatory requestor
+
+     controller requestor can
+      nonconsuming SendFee: ContractId Escrow 
+        with
+         amount: Decimal
+         sendingAccount: ContractId BankAccount
+         receivingAccount: ContractId BankAccount
+        do
+         transfer <- exercise sendingAccount TransferToEscrow
+          with
+            receiver = admin
+            transferAmount = amount
+            receivingAccount = receivingAccount
+         return (transfer) 
+
+     controller admin can
+       CheckPaymentAndCreate: ContractId Property --- add the checkPayment bit
+        do
+         
+         property <- create Property with
+           owner = requestor
+           price = 10000.00
+           royaltyRate = 0.05
+           priceHistory = [10000.00]
+           observers = []
+           issuer = admin
+         do
+         return (property)
+
+template Property
+    with
+     owner: Party
+     price: Decimal
+     royaltyRate: Decimal
+     priceHistory: [Decimal]
+     observers: [Party]
+     issuer: Party
+    where
+     observer observers
+     signatory owner, issuer
+     controller owner can
+
+      UpdateProperty: ContractId Property
+       with
+        newPrice: Decimal
+        newRoyaltyRate: Decimal
+        newObservers: [Party]
+       do
+        create this with
+          owner = owner
+          price = newPrice
+          royaltyRate = newRoyaltyRate
+          priceHistory = newPrice :: priceHistory
+          observers = newObservers
+
+      Transfer: ContractId FinalSaleReview
+       with
+        purchasePrice: Decimal
+        newOwner:Party
+        purchaserAccount: ContractId BankAccount
+        offerAge: Time
+       do
+        create FinalSaleReview with
+         newOwner
+         property = this
+         amount = purchasePrice
+         purchaserAccount = purchaserAccount
+         offerAge 
+
+
+
+template Offer
+    with
+     propertyOwner: Party
+     property: ContractId Property
+     potentialBuyer: Party
+     price: Decimal
+     account: ContractId BankAccount
+    where
+     signatory potentialBuyer
+     controller propertyOwner can
+
+      nonconsuming ValidateOffer: Bool
+       do
+        buyerBankInfo <-fetch account
+        propertyInfo  <- fetch property
+
+        if (buyerBankInfo.balance <= price + (price * (propertyInfo.price * propertyInfo.royaltyRate))) then
+         do 
+          return (False)
+        else
+         do
+          return (True)  
+
+      AcceptOffer: optional ContractId FinalSaleReview 
+         do     
+          timeOfAccept <-getTime
+          transfer <- exercise property Transfer with
+           purchasePrice = price
+           newOwner = potentialBuyer
+           purchaserAccount = account
+           offerAge = timeOfAccept
+
+          return (transfer)
+        
+      RejectOfffer: ()
+       do
+        return ()
+template FinalSaleReview
+  with
+    offerAge:Time
+    newOwner: Party
+    property: Property
+    amount: Decimal
+    purchaserAccount: ContractId BankAccount
+  where
+   signatory property.owner, property.issuer
+   controller newOwner can
+
+    ConfirmTransfer: ContractId Property
+       do
+    
+        time <- getTime
+        let maturity = (subTime (offerAge) (time))
+        -- assert(maturity >= (minutes 5))
+        create property with
+         owner = newOwner
+         price = amount 
+         priceHistory = amount :: property.priceHistory
+ 
+
+test: Script()
+
+test = do
+
+admin <- allocateParty "admin"
+bob <- allocateParty "bob"
+alice <- allocateParty "alice"
+
+createAccountA <- submit admin do
+    createCmd BankAccount with
+        owner = admin
+        balance = 0.00
+
+createAccountB <- submit bob do
+    createCmd BankAccount with
+        owner = bob
+        balance = 10000.00
+
+createAccountAlice <- submit alice do
+    createCmd BankAccount with
+        owner = alice
+        balance = 50000.00
+
+proposeMint <- submit bob do
+    createCmd ProposeMintProperty with
+        requestor = bob
+        admin = admin
+
+sendFee <- submit bob do
+    exerciseCmd proposeMint SendFee with
+        amount = 10000.00
+        sendingAccount = createAccountB
+        receivingAccount = createAccountA
+
+depoist <- submit admin do
+    exerciseCmd sendFee DepositToAccount
+
+create <- submit admin do
+    exerciseCmd proposeMint CheckPaymentAndCreate
+
+updateProperty <- submit bob do
+ exerciseCmd create UpdateProperty with
+    newPrice = 20000.00
+    newRoyaltyRate = 0.1
+    newObservers = [admin, alice]
+
+createOffer <- submit alice do
+    createCmd Offer with
+     propertyOwner = bob
+     property = updateProperty
+     potentialBuyer = alice
+     price = 25000.00
+     account = createAccountAlice
+
+validate <- submit bob do
+    exerciseCmd createOffer ValidateOffer
+-- acceptOffer <- submit bob do
+--     exerciseCmd createOffer AcceptOffer
+
+-- takeIt <- submit alice do
+--     exerciseCmd acceptOffer ConfirmTransfer
+assert(validate)
+test <- submitMustFail bob do
+    createCmd Property with
+        owner = bob
+        price = 100000.00
+        royaltyRate= 0.1
+        priceHistory = []
+        observers= []
+        issuer = admin
+
+return()

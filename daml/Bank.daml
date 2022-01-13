@@ -1,0 +1,147 @@
+module Bank where
+
+import Daml.Script
+
+template BankAccount 
+    with
+     owner: Party
+     balance: Decimal
+    where
+     signatory owner
+     controller owner can
+
+      Deposit: ContractId BankAccount
+        with deposit: Decimal
+        do
+         create this with 
+            balance = balance + deposit
+
+      TransferToAccount: ContractId TransferFunds
+        with
+            receiver: Party 
+            transferAmount: Decimal
+            receivingAccount: (ContractId BankAccount)
+        do
+          assert(transferAmount <= balance)
+          create this with 
+            balance = balance - transferAmount
+          create TransferFunds
+           with
+            receiver = receiver
+            sender = owner
+            amount = transferAmount
+            receivingAccount = receivingAccount
+
+      TransferToEscrow: ContractId Escrow
+        with
+            receiver: Party
+            transferAmount: Decimal
+            receivingAccount: ContractId BankAccount
+        do
+         assert(transferAmount <= balance)
+         create this with
+          balance = balance - transferAmount
+         create Escrow 
+          with
+           receiver = receiver
+           sender = owner
+           amount = transferAmount
+           receivingAccount = receivingAccount
+          
+        
+
+template TransferFunds
+    with
+     receiver: Party
+     sender: Party
+     amount: Decimal
+     receivingAccount: ContractId BankAccount
+    where
+     signatory sender
+     observer receiver
+     controller receiver can
+      
+      Accept: ContractId BankAccount
+        do
+        assert(amount > 0.00)
+        exercise receivingAccount Deposit 
+            with
+                deposit = amount
+
+
+template Escrow
+    with
+     receiver: Party
+     sender: Party
+     amount: Decimal
+     receivingAccount: ContractId BankAccount
+    where
+     signatory sender
+     controller receiver can
+        DepositToAccount: ContractId BankAccount 
+         do
+            assert(amount == 10000.00)
+            account <- fetch receivingAccount
+            let balance = account.balance
+            exercise receivingAccount Archive
+            create BankAccount with
+                owner = receiver
+                balance = balance + amount
+  
+
+
+template TransferFundsRequest
+    with
+     requestorAccount: ContractId BankAccount
+     requestor: Party
+     fulfiller : Party
+     amount: Decimal
+    where
+     signatory requestor
+     controller fulfiller can
+      
+      AcceptRequest: ContractId TransferFunds
+       do
+        assert(amount > 0.00)
+        create TransferFunds with
+         receiver = requestor
+         sender = fulfiller
+         amount = amount
+         receivingAccount = requestorAccount
+
+      RejectRequest: ()
+       do
+        return ()
+
+       
+     
+
+test : Script ()
+test = do
+
+alice <- allocateParty "alice"
+bob <- allocateParty "bob"
+
+createAccountA <- submit alice do
+    createCmd BankAccount with
+        owner = alice
+        balance = 1000.00
+
+createAccountB <- submit bob do
+    createCmd BankAccount with
+        owner = bob
+        balance = 100000.00
+
+transfer <- submit alice do
+    exerciseCmd createAccountA TransferToAccount
+     with
+        receiver = bob
+        transferAmount = 100.00
+        receivingAccount = createAccountB
+
+
+
+return ()
+
+     
+     
