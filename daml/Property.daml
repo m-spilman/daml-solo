@@ -1,11 +1,6 @@
 module Property where
 
 import Bank
-import Daml.Script
-
-
-
-
 template ProposeMintProperty
     with
      requestor:Party
@@ -72,7 +67,9 @@ template TransferPropertyRequest
      property: ContractId Property
      salePrice: Decimal
     where
-     signatory requestor
+     key owner : Party
+     maintainer key
+     signatory requestor, owner
      controller owner can
       TranferProperty: ContractId Property
        do
@@ -80,35 +77,15 @@ template TransferPropertyRequest
           newOwner
           salePrice
       
-     
-template BankHelper
+template TrasferPropertyRequestHelper
     with
         p: Party
     where
         signatory p
-        choice FetchByKey : (ContractId BankAccount, BankAccount)
+        choice FetchPropertyRequestByKey : (ContractId TransferPropertyRequest, TransferPropertyRequest)
             with
                 tKey: Party
             controller p
-           
-                do
-                 fetchByKey @BankAccount tKey
-            
-        choice LookupByKey : Optional (ContractId BankAccount)
-            with
-                tKey: Party
-            controller p
-         
-             do 
-
-             lookupByKey @BankAccount tKey
-
-
-
- --------------------------------------    
-
-test: Script()
-
-test = do
-
-return()
+            do
+              fetchByKey @TransferPropertyRequest tKey
+ 

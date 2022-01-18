@@ -2,8 +2,9 @@ sdk-version: 1.17.1
 name: scriptTest
 source: daml
 parties:
-  - Alice
-  - Bob
+  - Owner
+  - Buyer
+  - Admin
 version: 0.0.1
 dependencies:
   - daml-prim

@@ -21,13 +21,6 @@ template SaleAgreement
       do
        return()
     
-template Thing
- with
-  debtor: Party
- where
-  signatory debtor
-
-
 template PendingSale
   with
     finalContract: SaleAgreement
@@ -82,62 +75,94 @@ template PendingSale
           assert (signer `elem` toSign)
           create this with alreadySigned = signer :: alreadySigned
 
-    nonconsuming choice StartCompletionTransactions : () with
+    choice StartCompletionTransactions : () with
+    -- (ContractId PaymentRequest, ContractId PaymentRequest, ContractId TransferPropertyRequest) with
+
     -- ContractId SaleAgreement with
         signer : Party
         -- ownerAccount: ContractId BankAccount
         -- buyerAccount: ContractId BankAccount 
       controller signer
         do
-          currTime <- getTime
-          let passedTime = convertRelTimeToMicroseconds (subTime currTime timeOfOffer) 
-          let fiveMinutes = convertRelTimeToMicroseconds (minutes 5)
+            currTime <- getTime
+            let passedTime = convertRelTimeToMicroseconds (subTime currTime timeOfOffer) 
+            let fiveMinutes = convertRelTimeToMicroseconds (minutes 5)
     
           -- Check that all the required signatories have signed Pending
-          assert (sort alreadySigned == sort finalContract.signatories)
-  
-          if(passedTime > fiveMinutes) then do
+            assert (sort alreadySigned == sort finalContract.signatories)
+          -- if longer than 5 minuts have passed since the pending sale has been created automatically archive
+            if(passedTime > fiveMinutes) then do
             return()
-           else do
+            else do
+
+            -- Helpers to get active contracts
             ownerBankHelper <- create FundsHelper with p = signer
             ownerBankAndInfo <- exercise ownerBankHelper FetchAccountByKey with tKey = originalOffer.property.owner
+
             let ownerBankContractId = ownerBankAndInfo._1
+
+            buyerBankHelper <- create FundsHelper with p = signer
+            buyerBankAndInfo <- exercise buyerBankHelper FetchAccountByKey with tKey = originalOffer.buyer
+
+            let buyerBankContractId = buyerBankAndInfo._1
 
             adminBankHelper <- create FundsHelper with p = signer
             adminBankAndInfo <- exercise adminBankHelper FetchAccountByKey with tKey = signer
+
             let adminBankContractId = adminBankAndInfo._1
 
             propertyHelper <- create PropertyHelper with p = signer
             propertyAndInfo <- exercise propertyHelper FetchItemByKey with tKey = signer
+
             let propertyContractId = propertyAndInfo._1
 
-            create PaymentRequest with
+            -- owner requests payment and deposits money from buyer
+            ownerPaymentRequest <- create PaymentRequest with
               requestor = signer
               debtor = originalOffer.buyer
               payee = originalOffer.property.owner
               payeeAccount = ownerBankContractId
               amount = this.finalContract.amount
 
-            create PaymentRequest with
+            removeFundsBuyer <-exercise ownerPaymentRequest MakePayment with
+              account = buyerBankContractId
+            
+            depostFundsOwner <- exercise removeFundsBuyer Accept
+
+            -- admin requests payment of transation fee from owner and deposits money
+            transactionPaymentRequest<-create PaymentRequest with
               requestor = signer
               debtor = originalOffer.property.owner
               payee = signer
               payeeAccount = adminBankContractId
               amount = (this.finalContract.amount * 0.04)
-            
-            create TransferPropertyRequest with
+
+            -- get owners account again as previous refernce was archived above
+            ownerBankHelper <- create FundsHelper with p = signer
+            ownerBankAndInfo <- exercise ownerBankHelper FetchAccountByKey with tKey = originalOffer.property.owner
+            let ownerBankContractId = ownerBankAndInfo._1
+
+            removeFundsForTransactionFeeFromOwner <- exercise transactionPaymentRequest MakePayment with
+             account = ownerBankContractId
+
+            depostFundsAdmin <- exercise removeFundsForTransactionFeeFromOwner Accept
+
+            -- buyer requests tranfer of property and owner transfers
+            transferPropertyReqeust <-create TransferPropertyRequest with
              requestor = signer
              owner = originalOffer.property.owner
              newOwner = originalOffer.buyer
              property = propertyContractId
              salePrice = finalContract.amount
 
-            
+            exercise transferPropertyReqeust TranferProperty
 
-            -- salesAgreement <- create finalContract
-            -- exercise salesAgreement CompleteSale with
-            --  admin = signer
-            return()
+            -- create the final sale agreement for record
+            salesAgreement <- create finalContract
+            -- archive the agreement 
+            exercise salesAgreement Archive 
+      
+            return ()
  
 template MakeOffer
   with
@@ -186,12 +211,7 @@ template FundsHelper
             controller p
             do
               fetchByKey @BankAccount tKey
-        -- choice LookupAccountByKey : Optional (ContractId BankAccount)
-        --     with
-        --         tKey: Party
-        --     controller p
-        --     do 
-        --       lookupByKey @BankAccount tKey
+
 template OfferHelper
     with
         p: Party
@@ -236,7 +256,7 @@ createAccountBuyer <- submit buyer do
     createCmd BankAccount with
         admin = admin
         owner = buyer
-        balance = 150000.00
+        balance = 100000.00
 
 createAccountOwner <- submit owner do
     createCmd BankAccount with
@@ -244,7 +264,7 @@ createAccountOwner <- submit owner do
         owner = owner
         balance = 10000.00
 
--- propose mint property, send money, deposit and creaet--
+-- propose mint property, send money, deposit and create--
 proposeMint <- submit owner do
     createCmd ProposeMintProperty with
         requestor = owner
@@ -267,7 +287,7 @@ createProperty <- submit admin do
     createCmd Property with
      owner = owner
      price = 10000.00
-     royaltyRate = 0.0
+     royaltyRate = 0.5
      priceHistory = [10000.00]
      authorizer = admin
 
@@ -294,7 +314,7 @@ getBankAccount <- submit admin do
   exerciseCmd bankHelper FetchAccountByKey with tKey = buyer
 
 let account = getBankAccount._2
--- let accountBalance = account.balance
+
 
 makeOffer <- submit buyer do
     createCmd MakeOffer with
@@ -340,13 +360,13 @@ pending <- submit buyer do
     exerciseCmd pending Sign with signer = buyer
 
 counter <- submit owner do
-   exerciseCmd pending Counter with signer = owner; newPrice = 90000.00
+   exerciseCmd pending Counter with signer = owner; newPrice = 50000.00
 
 pending <- submit admin do
   exerciseCmd counter Sign with signer = admin
 
 pending <- submit buyer do
-   exerciseCmd pending Counter with signer = buyer; newPrice = 80000.00
+   exerciseCmd pending Counter with signer = buyer; newPrice = 60000.00
 
 ownerAccept <- submit owner do
   exerciseCmd pending Sign with signer = owner
@@ -354,20 +374,9 @@ ownerAccept <- submit owner do
 adminAccept <- submit admin do
   exerciseCmd ownerAccept Sign with signer = admin
 
-now <- passTime (minutes 3)
+now <- passTime (minutes 4)
 
-starThePaperWork <- submit admin do
+executeThePaperWork <- submit admin do
   exerciseCmd adminAccept StartCompletionTransactions with signer = admin
-
--- transfer <- submit owner do
---  exerciseCmd createProperty Transfer with
---   newOwner = buyer
---   salePrice = 80.000
-
-
-
-
-     
-
 
 return()

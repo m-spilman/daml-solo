@@ -1,7 +1,4 @@
 module Bank where
-
-import Daml.Script
-
 template BankAccount 
     with
      owner: Party
@@ -44,7 +41,9 @@ template PaymentRequest
      payeeAccount: ContractId BankAccount
      amount: Decimal
     where
-     signatory requestor
+     key payee: Party
+     maintainer key
+     signatory requestor, payee
      controller debtor can
       MakePayment: ContractId TransferFunds
        with
@@ -54,6 +53,7 @@ template PaymentRequest
           receiver = payee
           transferAmount = amount
           receivingAccount = payeeAccount  
+
 template TransferFunds
     with
      receiver: Party
@@ -61,6 +61,8 @@ template TransferFunds
      amount: Decimal
      receivingAccount: ContractId BankAccount
     where
+     key sender : Party
+     maintainer key
      signatory sender
      controller receiver can
       
@@ -71,13 +73,39 @@ template TransferFunds
             with
                 deposit = amount
 
+template PaymentRequestHelper
+    with
+        p: Party
+    where
+        signatory p
+        choice FetchPayRequestByKey : (ContractId PaymentRequest, PaymentRequest)
+            with
+                tKey: Party
+            controller p
+            do
+              fetchByKey @PaymentRequest tKey
 
+template BankHelper
+    with
+        p: Party
+    where
+        signatory p
+        choice FetchByKey : (ContractId BankAccount, BankAccount)
+            with
+                tKey: Party
+            controller p
+           
+                do
+                 fetchByKey @BankAccount tKey
+            
+        choice LookupByKey : Optional (ContractId BankAccount)
+            with
+                tKey: Party
+            controller p
+         
+             do 
 
-
-test : Script ()
-test = do
-
-return ()
+             lookupByKey @BankAccount tKey
 
      
      
