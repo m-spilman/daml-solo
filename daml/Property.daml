@@ -28,11 +28,13 @@ template Property
      priceHistory: [Decimal]
      authorizer: Party
      propertyMinter: Party
+     observers: [Party]
   
     where
      key authorizer : Party
      maintainer key
-     observer authorizer
+    --  observer authorizer
+     observer observers
      signatory authorizer
      controller owner can
 
@@ -47,6 +49,7 @@ template Property
           royaltyRate
           priceHistory = newPrice :: priceHistory
           propertyMinter
+          observers = newObservers
          
         
       Transfer: ContractId Property

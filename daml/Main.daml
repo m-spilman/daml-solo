@@ -241,7 +241,6 @@ proposeMint <- submit owner do
 
 -- accountInfo <- queryFilter @BankAccount alice (\account -> (account.owner == alice))
 
-
 requestPayment <- submit admin do
  exerciseCmd proposeMint RequestPayment with
   account = createAccountAdmin
@@ -357,9 +356,6 @@ let accountCid = accountInfo._2
 
 
 -- account2 <- queryFilter @BankAccount buyer (\account -> (account.owner == alice))
-
-
-
 
 makeOffer <- submit alice do
     createCmd MakeOffer with
