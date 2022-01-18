@@ -47,7 +47,6 @@ template PendingSale
        newPrice: Decimal
       controller signer
       do 
-         now <- getTime
          assert (signer `elem` toSign)
          let newContract = SaleAgreement with signatories = finalContract.signatories; property = finalContract.property; amount = newPrice
 
@@ -92,30 +91,11 @@ template PendingSale
             else do
 
             -- Helpers to get active contracts
-            minterBankHelper <- create FundsHelper with p = signer
-            minterBankAndInfo <- exercise minterBankHelper FetchAccountByKey with tKey = originalOffer.property.propertyMinter
-
-            let minterBankContractId = minterBankAndInfo._1
-
-            ownerBankHelper <- create FundsHelper with p = signer
-            ownerBankAndInfo <- exercise ownerBankHelper FetchAccountByKey with tKey = originalOffer.property.owner
-
-            let ownerBankContractId = ownerBankAndInfo._1
-
-            buyerBankHelper <- create FundsHelper with p = signer
-            buyerBankAndInfo <- exercise buyerBankHelper FetchAccountByKey with tKey = originalOffer.buyer
-
-            let buyerBankContractId = buyerBankAndInfo._1
-
-            adminBankHelper <- create FundsHelper with p = signer
-            adminBankAndInfo <- exercise adminBankHelper FetchAccountByKey with tKey = signer
-
-            let adminBankContractId = adminBankAndInfo._1
-
-            propertyHelper <- create PropertyHelper with p = signer
-            propertyAndInfo <- exercise propertyHelper FetchItemByKey with tKey = signer
-
-            let propertyContractId = propertyAndInfo._1
+            (minterBankContractId, _) <- fetchByKey @BankAccount (originalOffer.property.propertyMinter)
+            (ownerBankContractId, _) <- fetchByKey @BankAccount (originalOffer.property.owner)
+            (buyerBankContractId, _) <- fetchByKey @BankAccount (originalOffer.buyer)
+            (adminBankContractId, _) <- fetchByKey @BankAccount (signer)
+            (propertyContractId, _) <- fetchByKey @Property (signer)
 
             -- owner requests payment and deposits money from buyer
 
@@ -159,9 +139,7 @@ template PendingSale
               amount = (this.finalContract.amount * 0.04)
 
             -- get owners account again as previous refernce was archived above
-            ownerBankHelper <- create FundsHelper with p = signer
-            ownerBankAndInfo <- exercise ownerBankHelper FetchAccountByKey with tKey = originalOffer.property.owner
-            let ownerBankContractId = ownerBankAndInfo._1
+            (ownerBankContractId, _) <- fetchByKey @BankAccount (originalOffer.property.owner)
 
             removeFundsForTransactionFeeFromOwner <- exercise transactionPaymentRequest MakePayment with
              account = ownerBankContractId
@@ -260,7 +238,7 @@ template PropertyHelper
 test: Script ()
 
 test = do
-now <- getTime
+now <- getTime -- gets the current time
  -- create parties-------
 buyer <- allocateParty "buyer"
 owner <- allocateParty "owner"
@@ -384,7 +362,7 @@ let finalContract = SaleAgreement with signatories = parties; property = propert
  
 
 pending <- submit admin do
-    createCmd PendingSale with finalContract; alreadySigned = [admin]; originalOffer = offer; timeOfOffer = now
+    createCmd PendingSale with finalContract; alreadySigned = [admin]; originalOffer = offer; timeOfOffer = now -- added time into contract
 
 pending <- submit buyer do
     exerciseCmd pending Sign with signer = buyer
@@ -434,6 +412,7 @@ getBankAccount <- submit admin do
   exerciseCmd bankHelper FetchAccountByKey with tKey = alice
 
 let account = getBankAccount._2
+
 
 
 makeOffer <- submit alice do

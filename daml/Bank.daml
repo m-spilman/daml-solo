@@ -85,27 +85,7 @@ template PaymentRequestHelper
             do
               fetchByKey @PaymentRequest tKey
 
-template BankHelper
-    with
-        p: Party
-    where
-        signatory p
-        choice FetchByKey : (ContractId BankAccount, BankAccount)
-            with
-                tKey: Party
-            controller p
-           
-                do
-                 fetchByKey @BankAccount tKey
-            
-        choice LookupByKey : Optional (ContractId BankAccount)
-            with
-                tKey: Party
-            controller p
-         
-             do 
-
-             lookupByKey @BankAccount tKey
+-- 
 
      
      
