@@ -1,1 +1,373 @@
+
 module Main where
+import Daml.Script
+import DA.Time
+import DA.List
+import Property
+import Bank
+
+template SaleAgreement
+  with
+    signatories: [Party]
+    property: Property
+    amount: Decimal
+  where
+    signatory signatories
+    ensure unique signatories
+
+    choice CancelSale: ()with 
+      admin : Party
+     controller admin
+      do
+       return()
+    
+template Thing
+ with
+  debtor: Party
+ where
+  signatory debtor
+
+
+template PendingSale
+  with
+    finalContract: SaleAgreement
+    alreadySigned: [Party]
+    originalOffer: MakeOffer
+    timeOfOffer: Time
+  where
+    signatory alreadySigned
+    observer finalContract.signatories
+    ensure
+      -- Can't have duplicate signatories
+      unique alreadySigned
+
+    -- The parties who need to sign is the finalContract.signatories with alreadySigned filtered out
+    let toSign = filter (`notElem` alreadySigned) finalContract.signatories
+    choice Reject: () with
+       signer: Party
+     controller signer
+     do
+      return()
+    choice Counter: ContractId PendingSale with
+       signer: Party
+       newPrice: Decimal
+      controller signer
+      do 
+         now <- getTime
+         assert (signer `elem` toSign)
+         let newContract = SaleAgreement with signatories = finalContract.signatories; property = finalContract.property; amount = newPrice
+
+         newOffer <- create MakeOffer with
+          amount = newPrice
+          property = originalOffer.property
+          authorizer = originalOffer.authorizer
+          controllers = originalOffer.controllers
+          buyer = originalOffer.buyer
+          buyerAccount = originalOffer.buyerAccount
+
+         newOfferForValidation <- exercise newOffer ValidateFunds
+         newValidation <- exercise newOfferForValidation Validate
+
+         assertMsg("buyer does not have the funds for counterOffer")(newValidation)
+     
+         create this with
+          finalContract = newContract
+          alreadySigned = [signer]
+
+    choice Sign : ContractId PendingSale with
+        signer : Party
+      controller signer
+        do
+          -- Check the controller is in the toSign list, and if they are, sign the Pending contract
+          assert (signer `elem` toSign)
+          create this with alreadySigned = signer :: alreadySigned
+
+    nonconsuming choice StartCompletionTransactions : () with
+    -- ContractId SaleAgreement with
+        signer : Party
+        -- ownerAccount: ContractId BankAccount
+        -- buyerAccount: ContractId BankAccount 
+      controller signer
+        do
+          currTime <- getTime
+          let passedTime = convertRelTimeToMicroseconds (subTime currTime timeOfOffer) 
+          let fiveMinutes = convertRelTimeToMicroseconds (minutes 5)
+    
+          -- Check that all the required signatories have signed Pending
+          assert (sort alreadySigned == sort finalContract.signatories)
+  
+          if(passedTime > fiveMinutes) then do
+            return()
+           else do
+            ownerBankHelper <- create FundsHelper with p = signer
+            ownerBankAndInfo <- exercise ownerBankHelper FetchAccountByKey with tKey = originalOffer.property.owner
+            let ownerBankContractId = ownerBankAndInfo._1
+
+            adminBankHelper <- create FundsHelper with p = signer
+            adminBankAndInfo <- exercise adminBankHelper FetchAccountByKey with tKey = signer
+            let adminBankContractId = adminBankAndInfo._1
+
+            propertyHelper <- create PropertyHelper with p = signer
+            propertyAndInfo <- exercise propertyHelper FetchItemByKey with tKey = signer
+            let propertyContractId = propertyAndInfo._1
+
+            create PaymentRequest with
+              requestor = signer
+              debtor = originalOffer.buyer
+              payee = originalOffer.property.owner
+              payeeAccount = ownerBankContractId
+              amount = this.finalContract.amount
+
+            create PaymentRequest with
+              requestor = signer
+              debtor = originalOffer.property.owner
+              payee = signer
+              payeeAccount = adminBankContractId
+              amount = (this.finalContract.amount * 0.04)
+            
+            create TransferPropertyRequest with
+             requestor = signer
+             owner = originalOffer.property.owner
+             newOwner = originalOffer.buyer
+             property = propertyContractId
+             salePrice = finalContract.amount
+
+            
+
+            -- salesAgreement <- create finalContract
+            -- exercise salesAgreement CompleteSale with
+            --  admin = signer
+            return()
+ 
+template MakeOffer
+  with
+    amount: Decimal
+    property: Property
+    authorizer: Party
+    controllers:[Party]
+    buyer: Party
+    buyerAccount: BankAccount
+  where
+    key buyer : Party
+    maintainer key
+    signatory buyer
+    observer authorizer
+    controller authorizer can
+      ValidateFunds: ContractId ValidateOffer
+       do
+        create ValidateOffer with offer = this
+
+
+template ValidateOffer
+  with
+    offer: MakeOffer
+  where
+    key offer.authorizer : Party
+    maintainer key
+    signatory offer.authorizer
+    observer offer.buyer
+    controller offer.authorizer can
+      Validate: Bool
+       do
+         if (0.0 > offer.buyerAccount.balance - (offer.amount + (offer.amount * offer.property.royaltyRate))) then do
+            return (False)
+         else do
+          return(True)
+
+
+template FundsHelper
+    with
+        p: Party
+    where
+        signatory p
+        choice FetchAccountByKey : (ContractId BankAccount, BankAccount)
+            with
+                tKey: Party
+            controller p
+            do
+              fetchByKey @BankAccount tKey
+        -- choice LookupAccountByKey : Optional (ContractId BankAccount)
+        --     with
+        --         tKey: Party
+        --     controller p
+        --     do 
+        --       lookupByKey @BankAccount tKey
+template OfferHelper
+    with
+        p: Party
+    where
+        signatory p
+        choice FetchOfferByKey : (ContractId MakeOffer, MakeOffer)
+            with
+                tKey: Party
+            controller p
+            do
+              fetchByKey @MakeOffer tKey
+
+template PropertyHelper
+    with
+        p: Party
+    where
+        signatory p
+        choice FetchItemByKey : (ContractId Property, Property)
+            with
+                tKey: Party
+            controller p
+            do
+              fetchByKey @Property tKey
+
+test: Script ()
+
+test = do
+now <- getTime
+ -- create parties-------
+buyer <- allocateParty "buyer"
+owner <- allocateParty "owner"
+admin <- allocateParty "admin"
+
+--- creat accounts-------
+createAccountAdmin <- submit admin do
+    createCmd BankAccount with
+        admin = admin
+        owner = admin
+        balance = 0.00
+
+createAccountBuyer <- submit buyer do
+    createCmd BankAccount with
+        admin = admin
+        owner = buyer
+        balance = 150000.00
+
+createAccountOwner <- submit owner do
+    createCmd BankAccount with
+        admin = admin
+        owner = owner
+        balance = 10000.00
+
+-- propose mint property, send money, deposit and creaet--
+proposeMint <- submit owner do
+    createCmd ProposeMintProperty with
+        requestor = owner
+        admin = admin
+
+
+requestPayment <- submit admin do
+ exerciseCmd proposeMint RequestPayment with
+  account = createAccountAdmin
+  amount = 10000.00
+
+sendPayment <- submit owner do
+    exerciseCmd requestPayment MakePayment with
+     account = createAccountOwner
+
+depoistPayment <- submit admin do
+    exerciseCmd sendPayment Accept
+
+createProperty <- submit admin do
+    createCmd Property with
+     owner = owner
+     price = 10000.00
+     royaltyRate = 0.0
+     priceHistory = [10000.00]
+     authorizer = admin
+
+---- start testing on multi party agreement----------
+
+let parties = [buyer, owner, admin]
+
+
+propertyHelper <- submit admin do
+        createCmd PropertyHelper with p = admin
+
+findProperty <- submit admin do
+        exerciseCmd propertyHelper FetchItemByKey with tKey = admin
+
+let property = findProperty._2
+
+let propertyPrice = property.price
+
+
+bankHelper <-submit admin do
+  createCmd FundsHelper with p = admin
+
+getBankAccount <- submit admin do
+  exerciseCmd bankHelper FetchAccountByKey with tKey = buyer
+
+let account = getBankAccount._2
+-- let accountBalance = account.balance
+
+makeOffer <- submit buyer do
+    createCmd MakeOffer with
+        buyer = buyer
+        authorizer = admin
+        property = property
+        amount = propertyPrice
+        controllers = parties
+        buyerAccount = account
+
+
+
+offerHelper <- submit admin do
+        createCmd OfferHelper with p = admin
+
+findOffer <- submit admin do
+        exerciseCmd offerHelper FetchOfferByKey with tKey = buyer 
+
+
+let offer = findOffer._2
+let offerPrice = offer.amount
+
+
+adminValidationContract <- submit admin do
+  exerciseCmd makeOffer ValidateFunds
+
+
+
+validate <- submit admin do
+ exerciseCmd adminValidationContract Validate
+
+assertMsg("Buyer does not have required funds")(validate)
+
+
+
+let finalContract = SaleAgreement with signatories = parties; property = property; amount = offerPrice
+ 
+
+pending <- submit admin do
+    createCmd PendingSale with finalContract; alreadySigned = [admin]; originalOffer = offer; timeOfOffer = now
+
+pending <- submit buyer do
+    exerciseCmd pending Sign with signer = buyer
+
+counter <- submit owner do
+   exerciseCmd pending Counter with signer = owner; newPrice = 90000.00
+
+pending <- submit admin do
+  exerciseCmd counter Sign with signer = admin
+
+pending <- submit buyer do
+   exerciseCmd pending Counter with signer = buyer; newPrice = 80000.00
+
+ownerAccept <- submit owner do
+  exerciseCmd pending Sign with signer = owner
+
+adminAccept <- submit admin do
+  exerciseCmd ownerAccept Sign with signer = admin
+
+now <- passTime (minutes 3)
+
+starThePaperWork <- submit admin do
+  exerciseCmd adminAccept StartCompletionTransactions with signer = admin
+
+-- transfer <- submit owner do
+--  exerciseCmd createProperty Transfer with
+--   newOwner = buyer
+--   salePrice = 80.000
+
+
+
+
+     
+
+
+return()

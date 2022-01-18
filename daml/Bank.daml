@@ -5,9 +5,13 @@ import Daml.Script
 template BankAccount 
     with
      owner: Party
+     admin: Party
      balance: Decimal
     where
      signatory owner
+     observer admin
+     key owner : Party
+     maintainer key
      controller owner can
 
       Deposit: ContractId BankAccount
@@ -20,36 +24,36 @@ template BankAccount
         with
             receiver: Party 
             transferAmount: Decimal
-            receivingAccount: (ContractId BankAccount)
+            receivingAccount: ContractId BankAccount
         do
           assert(transferAmount <= balance)
           create this with 
             balance = balance - transferAmount
           create TransferFunds
            with
-            receiver = receiver
+            receiver 
             sender = owner
             amount = transferAmount
-            receivingAccount = receivingAccount
-
-      TransferToEscrow: ContractId Escrow
-        with
-            receiver: Party
-            transferAmount: Decimal
-            receivingAccount: ContractId BankAccount
-        do
-         assert(transferAmount <= balance)
-         create this with
-          balance = balance - transferAmount
-         create Escrow 
-          with
-           receiver = receiver
-           sender = owner
-           amount = transferAmount
-           receivingAccount = receivingAccount
-          
+            receivingAccount 
         
-
+template PaymentRequest
+    with
+     requestor: Party
+     debtor: Party
+     payee: Party
+     payeeAccount: ContractId BankAccount
+     amount: Decimal
+    where
+     signatory requestor
+     controller debtor can
+      MakePayment: ContractId TransferFunds
+       with
+        account: ContractId BankAccount
+       do
+         exercise account TransferToAccount with
+          receiver = payee
+          transferAmount = amount
+          receivingAccount = payeeAccount  
 template TransferFunds
     with
      receiver: Party
@@ -58,7 +62,6 @@ template TransferFunds
      receivingAccount: ContractId BankAccount
     where
      signatory sender
-     observer receiver
      controller receiver can
       
       Accept: ContractId BankAccount
@@ -69,77 +72,10 @@ template TransferFunds
                 deposit = amount
 
 
-template Escrow
-    with
-     receiver: Party
-     sender: Party
-     amount: Decimal
-     receivingAccount: ContractId BankAccount
-    where
-     signatory sender
-     controller receiver can
-        DepositToAccount: ContractId BankAccount 
-         do
-            assert(amount == 10000.00)
-            account <- fetch receivingAccount
-            let balance = account.balance
-            exercise receivingAccount Archive
-            create BankAccount with
-                owner = receiver
-                balance = balance + amount
-  
 
-
-template TransferFundsRequest
-    with
-     requestorAccount: ContractId BankAccount
-     requestor: Party
-     fulfiller : Party
-     amount: Decimal
-    where
-     signatory requestor
-     controller fulfiller can
-      
-      AcceptRequest: ContractId TransferFunds
-       do
-        assert(amount > 0.00)
-        create TransferFunds with
-         receiver = requestor
-         sender = fulfiller
-         amount = amount
-         receivingAccount = requestorAccount
-
-      RejectRequest: ()
-       do
-        return ()
-
-       
-     
 
 test : Script ()
 test = do
-
-alice <- allocateParty "alice"
-bob <- allocateParty "bob"
-
-createAccountA <- submit alice do
-    createCmd BankAccount with
-        owner = alice
-        balance = 1000.00
-
-createAccountB <- submit bob do
-    createCmd BankAccount with
-        owner = bob
-        balance = 100000.00
-
-transfer <- submit alice do
-    exerciseCmd createAccountA TransferToAccount
-     with
-        receiver = bob
-        transferAmount = 100.00
-        receivingAccount = createAccountB
-
-
 
 return ()
 
