@@ -198,43 +198,6 @@ template ValidateOffer
          else do
           return(True)
 
-
-template FundsHelper
-    with
-        p: Party
-    where
-        signatory p
-        choice FetchAccountByKey : (ContractId BankAccount, BankAccount)
-            with
-                tKey: Party
-            controller p
-            do
-              fetchByKey @BankAccount tKey
-
-template OfferHelper
-    with
-        p: Party
-    where
-        signatory p
-        choice FetchOfferByKey : (ContractId MakeOffer, MakeOffer)
-            with
-                tKey: Party
-            controller p
-            do
-              fetchByKey @MakeOffer tKey
-
-template PropertyHelper
-    with
-        p: Party
-    where
-        signatory p
-        choice FetchItemByKey : (ContractId Property, Property)
-            with
-                tKey: Party
-            controller p
-            do
-              fetchByKey @Property tKey
-
 test: Script ()
 
 test = do
@@ -276,6 +239,8 @@ proposeMint <- submit owner do
         requestor = owner
         admin = admin
 
+-- accountInfo <- queryFilter @BankAccount alice (\account -> (account.owner == alice))
+
 
 requestPayment <- submit admin do
  exerciseCmd proposeMint RequestPayment with
@@ -297,31 +262,23 @@ createProperty <- submit admin do
      priceHistory = [10000.00]
      authorizer = admin
      propertyMinter = owner
- 
+     observers = [alice, buyer]
+
 
 ---- start testing on multi party agreement sale 1----------
 
 let parties = [buyer, owner, admin]
 
 
-propertyHelper <- submit admin do
-        createCmd PropertyHelper with p = admin
-
-findProperty <- submit admin do
-        exerciseCmd propertyHelper FetchItemByKey with tKey = admin
-
-let property = findProperty._2
-
-let propertyPrice = property.price
+property <- query @Property buyer
+let propertyInfo = head property
+let propertyPrice = propertyInfo._2.price
+let property = propertyInfo._2
 
 
-bankHelper <-submit admin do
-  createCmd FundsHelper with p = admin
-
-getBankAccount <- submit admin do
-  exerciseCmd bankHelper FetchAccountByKey with tKey = buyer
-
-let account = getBankAccount._2
+account <- query @BankAccount buyer
+let accountInfo = head account
+let accountCid = accountInfo._2
 
 
 makeOffer <- submit buyer do
@@ -331,24 +288,18 @@ makeOffer <- submit buyer do
         property = property
         amount = propertyPrice
         controllers = parties
-        buyerAccount = account
+        buyerAccount = accountCid
 
 
 
-offerHelper <- submit admin do
-        createCmd OfferHelper with p = admin
-
-findOffer <- submit admin do
-        exerciseCmd offerHelper FetchOfferByKey with tKey = buyer 
-
-
-let offer = findOffer._2
-let offerPrice = offer.amount
+offer <- query @MakeOffer buyer
+let offerInfo = head offer
+let amount = offerInfo._2.amount
+let theOffer = offerInfo._2
 
 
 adminValidationContract <- submit admin do
   exerciseCmd makeOffer ValidateFunds
-
 
 
 validate <- submit admin do
@@ -358,11 +309,11 @@ assertMsg("Buyer does not have required funds")(validate)
 
 
 
-let finalContract = SaleAgreement with signatories = parties; property = property; amount = offerPrice
+let finalContract = SaleAgreement with signatories = parties; property = property; amount = amount
  
 
 pending <- submit admin do
-    createCmd PendingSale with finalContract; alreadySigned = [admin]; originalOffer = offer; timeOfOffer = now -- added time into contract
+    createCmd PendingSale with finalContract; alreadySigned = [admin]; originalOffer = theOffer; timeOfOffer = now 
 
 pending <- submit buyer do
     exerciseCmd pending Sign with signer = buyer
@@ -393,25 +344,20 @@ executeThePaperWork <- submit admin do
 
 let parties = [alice, buyer, admin]
 
-
-propertyHelper <- submit admin do
-        createCmd PropertyHelper with p = admin
-
-findProperty <- submit admin do
-        exerciseCmd propertyHelper FetchItemByKey with tKey = admin
-
-let property = findProperty._2
-
-let propertyPrice = property.price
+property <- query @Property alice
+let propertyInfo = head property
+let propertyPrice = propertyInfo._2.price
+let property = propertyInfo._2
 
 
-bankHelper <-submit admin do
-  createCmd FundsHelper with p = admin
+account <- query @BankAccount alice
+let accountInfo = head account
+let accountCid = accountInfo._2
 
-getBankAccount <- submit admin do
-  exerciseCmd bankHelper FetchAccountByKey with tKey = alice
 
-let account = getBankAccount._2
+
+-- account2 <- queryFilter @BankAccount buyer (\account -> (account.owner == alice))
+
 
 
 
@@ -422,18 +368,12 @@ makeOffer <- submit alice do
         property = property
         amount = propertyPrice
         controllers = parties
-        buyerAccount = account
+        buyerAccount = accountCid
 
-offerHelper <- submit admin do
-        createCmd OfferHelper with p = admin
-
-findOffer <- submit admin do
-        exerciseCmd offerHelper FetchOfferByKey with tKey = alice 
-
-
-let offer = findOffer._2
-let offerPrice = offer.amount
-
+offer <- query @MakeOffer alice
+let offerInfo = head offer
+let amount = offerInfo._2.amount
+let theOffer = offerInfo._2 
 
 adminValidationContract <- submit admin do
   exerciseCmd makeOffer ValidateFunds
@@ -443,12 +383,12 @@ validate <- submit admin do
 
 assertMsg("Buyer does not have required funds")(validate)
 
-let finalContract = SaleAgreement with signatories = parties; property = property; amount = offerPrice
+let finalContract = SaleAgreement with signatories = parties; property = property; amount = amount
  
 now <- getTime
 
 pending <- submit admin do
-    createCmd PendingSale with finalContract; alreadySigned = [admin]; originalOffer = offer; timeOfOffer = now
+    createCmd PendingSale with finalContract; alreadySigned = [admin]; originalOffer = theOffer; timeOfOffer = now
 
 pending <- submit alice do
     exerciseCmd pending Sign with signer = alice
