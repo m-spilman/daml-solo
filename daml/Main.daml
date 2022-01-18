@@ -6,6 +6,7 @@ import DA.List
 import Property
 import Bank
 
+
 template SaleAgreement
   with
     signatories: [Party]
@@ -96,6 +97,11 @@ template PendingSale
             else do
 
             -- Helpers to get active contracts
+            minterBankHelper <- create FundsHelper with p = signer
+            minterBankAndInfo <- exercise minterBankHelper FetchAccountByKey with tKey = originalOffer.property.propertyMinter
+
+            let minterBankContractId = minterBankAndInfo._1
+
             ownerBankHelper <- create FundsHelper with p = signer
             ownerBankAndInfo <- exercise ownerBankHelper FetchAccountByKey with tKey = originalOffer.property.owner
 
@@ -117,6 +123,7 @@ template PendingSale
             let propertyContractId = propertyAndInfo._1
 
             -- owner requests payment and deposits money from buyer
+
             ownerPaymentRequest <- create PaymentRequest with
               requestor = signer
               debtor = originalOffer.buyer
@@ -128,6 +135,26 @@ template PendingSale
               account = buyerBankContractId
             
             depostFundsOwner <- exercise removeFundsBuyer Accept
+         
+          -- buyer pays roylaity to original owner
+
+            -- royaltyPayment <- if finalContract.property.owner == finalContract.property.propertyMinter
+            --  then return None
+            --  else Some <$>
+            --   do
+
+            --   royaltyRequest <- create PaymentRequest with
+            --    requestor = signer
+            --    debtor = originalOffer.property.owner
+            --    payee = originalOffer.property.propertyMinter
+            --    payeeAccount = minterBankContractId
+            --    amount = finalContract.amount * finalContract.property.royaltyRate
+
+            --   removeFundsOwner <-exercise royaltyRequest MakePayment with
+            --    account = ownerBankContractId
+
+            --   exercise removeFundsOwner Accept
+        
 
             -- admin requests payment of transation fee from owner and deposits money
             transactionPaymentRequest<-create PaymentRequest with
@@ -244,6 +271,7 @@ now <- getTime
 buyer <- allocateParty "buyer"
 owner <- allocateParty "owner"
 admin <- allocateParty "admin"
+alice <- allocateParty "alice"
 
 --- creat accounts-------
 createAccountAdmin <- submit admin do
@@ -263,6 +291,12 @@ createAccountOwner <- submit owner do
         admin = admin
         owner = owner
         balance = 10000.00
+
+createAccountAlice <- submit alice do
+    createCmd BankAccount with
+        admin = admin
+        owner = alice
+        balance = 150000.00
 
 -- propose mint property, send money, deposit and create--
 proposeMint <- submit owner do
@@ -290,8 +324,10 @@ createProperty <- submit admin do
      royaltyRate = 0.5
      priceHistory = [10000.00]
      authorizer = admin
+     propertyMinter = owner
+ 
 
----- start testing on multi party agreement----------
+---- start testing on multi party agreement sale 1----------
 
 let parties = [buyer, owner, admin]
 
@@ -378,5 +414,77 @@ now <- passTime (minutes 4)
 
 executeThePaperWork <- submit admin do
   exerciseCmd adminAccept StartCompletionTransactions with signer = admin
+
+
+
+---- multi party agreement sale 2 resale property to alice ----------
+
+let parties = [alice, buyer, admin]
+
+
+propertyHelper <- submit admin do
+        createCmd PropertyHelper with p = admin
+
+findProperty <- submit admin do
+        exerciseCmd propertyHelper FetchItemByKey with tKey = admin
+
+let property = findProperty._2
+
+let propertyPrice = property.price
+
+
+bankHelper <-submit admin do
+  createCmd FundsHelper with p = admin
+
+getBankAccount <- submit admin do
+  exerciseCmd bankHelper FetchAccountByKey with tKey = alice
+
+let account = getBankAccount._2
+
+
+makeOffer <- submit alice do
+    createCmd MakeOffer with
+        buyer = alice
+        authorizer = admin
+        property = property
+        amount = propertyPrice
+        controllers = parties
+        buyerAccount = account
+
+offerHelper <- submit admin do
+        createCmd OfferHelper with p = admin
+
+findOffer <- submit admin do
+        exerciseCmd offerHelper FetchOfferByKey with tKey = alice 
+
+
+let offer = findOffer._2
+let offerPrice = offer.amount
+
+
+adminValidationContract <- submit admin do
+  exerciseCmd makeOffer ValidateFunds
+
+validate <- submit admin do
+ exerciseCmd adminValidationContract Validate
+
+assertMsg("Buyer does not have required funds")(validate)
+
+let finalContract = SaleAgreement with signatories = parties; property = property; amount = offerPrice
+ 
+now <- getTime
+
+pending <- submit admin do
+    createCmd PendingSale with finalContract; alreadySigned = [admin]; originalOffer = offer; timeOfOffer = now
+
+pending <- submit alice do
+    exerciseCmd pending Sign with signer = alice
+
+ownerAccept <- submit buyer do
+  exerciseCmd pending Sign with signer = buyer
+
+executeThePaperWork <- submit admin do
+  exerciseCmd ownerAccept StartCompletionTransactions with signer = admin
+
 
 return()
