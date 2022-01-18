@@ -77,12 +77,7 @@ template PendingSale
           create this with alreadySigned = signer :: alreadySigned
 
     choice StartCompletionTransactions : () with
-    -- (ContractId PaymentRequest, ContractId PaymentRequest, ContractId TransferPropertyRequest) with
-
-    -- ContractId SaleAgreement with
         signer : Party
-        -- ownerAccount: ContractId BankAccount
-        -- buyerAccount: ContractId BankAccount 
       controller signer
         do
             currTime <- getTime
@@ -142,18 +137,17 @@ template PendingSale
             --  then return None
             --  else Some <$>
             --   do
+              -- royaltyRequest <- create PaymentRequest with
+              --  requestor = signer
+              --  debtor = originalOffer.property.owner
+              --  payee = originalOffer.property.propertyMinter
+              --  payeeAccount = minterBankContractId
+              --  amount = finalContract.amount * finalContract.property.royaltyRate
 
-            --   royaltyRequest <- create PaymentRequest with
-            --    requestor = signer
-            --    debtor = originalOffer.property.owner
-            --    payee = originalOffer.property.propertyMinter
-            --    payeeAccount = minterBankContractId
-            --    amount = finalContract.amount * finalContract.property.royaltyRate
+              -- removeFundsOwner <-exercise royaltyRequest MakePayment with
+              --  account = ownerBankContractId
 
-            --   removeFundsOwner <-exercise royaltyRequest MakePayment with
-            --    account = ownerBankContractId
-
-            --   exercise removeFundsOwner Accept
+              -- exercise removeFundsOwner Accept
         
 
             -- admin requests payment of transation fee from owner and deposits money
