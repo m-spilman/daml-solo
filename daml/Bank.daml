@@ -32,7 +32,27 @@ template BankAccount
             sender = owner
             amount = transferAmount
             receivingAccount 
-        
+
+template RoyaltyPaymentRequest
+  with
+   requestor: Party
+   debtor: Party
+   payee: Party
+   payeeAccount: ContractId BankAccount
+   amount: Decimal
+  where
+  signatory requestor
+  controller debtor can
+    PayRoyalty: ContractId TransferFunds
+     with
+      account: ContractId BankAccount
+     do
+       exercise account TransferToAccount with
+        receiver = payee
+        transferAmount = amount
+        receivingAccount = payeeAccount  
+
+  
 template PaymentRequest
     with
      requestor: Party
@@ -61,29 +81,14 @@ template TransferFunds
      amount: Decimal
      receivingAccount: ContractId BankAccount
     where
-     key sender : Party
-     maintainer key
      signatory sender
      controller receiver can
-      
       Accept: ContractId BankAccount
         do
         assert(amount > 0.00)
         exercise receivingAccount Deposit 
-            with
-                deposit = amount
-
-template PaymentRequestHelper
-    with
-        p: Party
-    where
-        signatory p
-        choice FetchPayRequestByKey : (ContractId PaymentRequest, PaymentRequest)
-            with
-                tKey: Party
-            controller p
-            do
-              fetchByKey @PaymentRequest tKey
+         with
+          deposit = amount
 
 -- 
 

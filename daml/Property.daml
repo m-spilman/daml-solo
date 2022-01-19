@@ -33,7 +33,6 @@ template Property
     where
      key authorizer : Party
      maintainer key
-    --  observer authorizer
      observer observers
      signatory authorizer
      controller owner can
@@ -84,15 +83,4 @@ template TransferPropertyRequest
           newOwner
           salePrice
       
-template TrasferPropertyRequestHelper
-    with
-        p: Party
-    where
-        signatory p
-        choice FetchPropertyRequestByKey : (ContractId TransferPropertyRequest, TransferPropertyRequest)
-            with
-                tKey: Party
-            controller p
-            do
-              fetchByKey @TransferPropertyRequest tKey
  

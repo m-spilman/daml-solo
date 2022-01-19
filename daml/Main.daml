@@ -6,7 +6,6 @@ import DA.List
 import Property
 import Bank
 
-
 template SaleAgreement
   with
     signatories: [Party]
@@ -37,7 +36,7 @@ template PendingSale
 
     -- The parties who need to sign is the finalContract.signatories with alreadySigned filtered out
     let toSign = filter (`notElem` alreadySigned) finalContract.signatories
-    choice Reject: () with
+    choice CancelNegotiations: () with
        signer: Party
      controller signer
      do
@@ -85,7 +84,8 @@ template PendingSale
     
           -- Check that all the required signatories have signed Pending
             assert (sort alreadySigned == sort finalContract.signatories)
-          -- if longer than 5 minuts have passed since the pending sale has been created automatically archive
+
+          -- if longer than 5 minuts have passed since the pending sale has been created, automatically archive
             if(passedTime > fiveMinutes) then do
             return()
             else do
@@ -113,23 +113,23 @@ template PendingSale
          
           -- buyer pays roylaity to original owner
 
-            -- royaltyPayment <- if finalContract.property.owner == finalContract.property.propertyMinter
-            --  then return None
-            --  else Some <$>
-            --   do
-              -- royaltyRequest <- create PaymentRequest with
-              --  requestor = signer
-              --  debtor = originalOffer.property.owner
-              --  payee = originalOffer.property.propertyMinter
-              --  payeeAccount = minterBankContractId
-              --  amount = finalContract.amount * finalContract.property.royaltyRate
+            royaltyPayment <- if finalContract.property.owner == finalContract.property.propertyMinter
+             then return None
+             else Some <$>
+              do
+              (ownerBankContractId, _) <- fetchByKey @BankAccount (originalOffer.property.owner)
 
-              -- removeFundsOwner <-exercise royaltyRequest MakePayment with
-              --  account = ownerBankContractId
+              royaltyRequest <- create RoyaltyPaymentRequest with
+               requestor = signer
+               debtor = originalOffer.property.owner
+               payee = originalOffer.property.propertyMinter
+               payeeAccount = minterBankContractId
+               amount = finalContract.amount * finalContract.property.royaltyRate
 
-              -- exercise removeFundsOwner Accept
-        
+              exercise royaltyRequest PayRoyalty with
+               account = ownerBankContractId
 
+  
             -- admin requests payment of transation fee from owner and deposits money
             transactionPaymentRequest<-create PaymentRequest with
               requestor = signer
@@ -193,15 +193,21 @@ template ValidateOffer
     controller offer.authorizer can
       Validate: Bool
        do
-         if (0.0 > offer.buyerAccount.balance - (offer.amount + (offer.amount * offer.property.royaltyRate))) then do
-            return (False)
-         else do
-          return(True)
+        -- assertMsg("Testing  " <> show (offer.buyerAccount.balance - offer.amount) )(5>7)
+        if((offer.property.propertyMinter == offer.property.owner) && (0.0 < offer.buyerAccount.balance - offer.amount)) then do
+         return(True)
+        else if ((offer.property.propertyMinter /= offer.property.owner) && (0.0 < offer.buyerAccount.balance - (offer.amount + (offer.amount * offer.property.royaltyRate)))) then do 
+         return (True)
+        else do
+          return (False)
+
+    
 
 test: Script ()
 
 test = do
-now <- getTime -- gets the current time
+now <- getTime
+
  -- create parties-------
 buyer <- allocateParty "buyer"
 owner <- allocateParty "owner"
@@ -239,8 +245,6 @@ proposeMint <- submit owner do
         requestor = owner
         admin = admin
 
--- accountInfo <- queryFilter @BankAccount alice (\account -> (account.owner == alice))
-
 requestPayment <- submit admin do
  exerciseCmd proposeMint RequestPayment with
   account = createAccountAdmin
@@ -257,7 +261,7 @@ createProperty <- submit admin do
     createCmd Property with
      owner = owner
      price = 10000.00
-     royaltyRate = 0.5
+     royaltyRate = 0.05
      priceHistory = [10000.00]
      authorizer = admin
      propertyMinter = owner
@@ -289,8 +293,6 @@ makeOffer <- submit buyer do
         controllers = parties
         buyerAccount = accountCid
 
-
-
 offer <- query @MakeOffer buyer
 let offerInfo = head offer
 let amount = offerInfo._2.amount
@@ -303,6 +305,7 @@ adminValidationContract <- submit admin do
 
 validate <- submit admin do
  exerciseCmd adminValidationContract Validate
+
 
 assertMsg("Buyer does not have required funds")(validate)
 
@@ -337,8 +340,6 @@ now <- passTime (minutes 4)
 executeThePaperWork <- submit admin do
   exerciseCmd adminAccept StartCompletionTransactions with signer = admin
 
-
-
 ---- multi party agreement sale 2 resale property to alice ----------
 
 let parties = [alice, buyer, admin]
@@ -352,10 +353,6 @@ let property = propertyInfo._2
 account <- query @BankAccount alice
 let accountInfo = head account
 let accountCid = accountInfo._2
-
-
-
--- account2 <- queryFilter @BankAccount buyer (\account -> (account.owner == alice))
 
 makeOffer <- submit alice do
     createCmd MakeOffer with
@@ -394,6 +391,14 @@ ownerAccept <- submit buyer do
 
 executeThePaperWork <- submit admin do
   exerciseCmd ownerAccept StartCompletionTransactions with signer = admin
+
+transfer <- query @TransferFunds owner
+let transferInfo = head transfer
+let transferCid = transferInfo._1
+
+collectRoyalty <- submit owner do 
+  exerciseCmd transferCid Accept
+
 
 
 return()
