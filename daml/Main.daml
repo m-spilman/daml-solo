@@ -194,7 +194,6 @@ template ValidateOffer
     controller offer.authorizer can
       Validate: Bool
        do
-        -- assertMsg("Testing  " <> show (offer.buyerAccount.balance - offer.amount) )(5>7)
         if((offer.property.propertyMinter == offer.property.owner) && (0.0 < offer.buyerAccount.balance - offer.amount)) then do
          return(True)
         else if ((offer.property.propertyMinter /= offer.property.owner) && (0.0 < offer.buyerAccount.balance - (offer.amount + (offer.amount * offer.property.royaltyRate)))) then do 
@@ -257,6 +256,7 @@ sendPayment <- submit owner do
 
 depoistPayment <- submit admin do
     exerciseCmd sendPayment Accept
+
 
 createProperty <- submit admin do
     createCmd Property with
@@ -441,7 +441,6 @@ let transferCid = transferInfo._1
 
 collectRoyalty <- submit owner do 
   exerciseCmd transferCid Accept
-
 
 
 return()
