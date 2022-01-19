@@ -19,7 +19,9 @@ template ProposeMintProperty
           debtor = requestor
           payeeAccount = account
           amount = amount
+   
 
+type PropertyKey = (Party, Party, Time)
 template Property
     with
      owner: Party
@@ -29,10 +31,11 @@ template Property
      authorizer: Party
      propertyMinter: Party
      observers: [Party]
+     mintTime: Time
   
     where
-     key authorizer : Party
-     maintainer key
+     key (owner, authorizer, mintTime): PropertyKey
+     maintainer key._2
      observer observers
      signatory authorizer
      controller owner can
@@ -49,6 +52,7 @@ template Property
           priceHistory = newPrice :: priceHistory
           propertyMinter
           observers = newObservers
+          mintTime
          
         
       Transfer: ContractId Property

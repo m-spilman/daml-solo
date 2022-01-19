@@ -95,7 +95,8 @@ template PendingSale
             (ownerBankContractId, _) <- fetchByKey @BankAccount (originalOffer.property.owner)
             (buyerBankContractId, _) <- fetchByKey @BankAccount (originalOffer.buyer)
             (adminBankContractId, _) <- fetchByKey @BankAccount (signer)
-            (propertyContractId, _) <- fetchByKey @Property (signer)
+            -- (propertyContractId, _) <- fetchByKey @Property (signer)
+            (propertyContractId, _) <- fetchByKey @Property (originalOffer.property.owner, signer, originalOffer.property.mintTime)
 
             -- owner requests payment and deposits money from buyer
 
@@ -231,7 +232,7 @@ createAccountOwner <- submit owner do
     createCmd BankAccount with
         admin = admin
         owner = owner
-        balance = 10000.00
+        balance = 25000.00
 
 createAccountAlice <- submit alice do
     createCmd BankAccount with
@@ -266,7 +267,49 @@ createProperty <- submit admin do
      authorizer = admin
      propertyMinter = owner
      observers = [alice, buyer]
+     mintTime = now
 
+-- same as above, creating a second property for owner---
+
+passingTime <- passTime (minutes 1)
+now<- getTime
+
+
+proposeMint <- submit owner do
+    createCmd ProposeMintProperty with
+        requestor = owner
+        admin = admin
+
+accountOwner <- query @BankAccount owner
+let accountInfoOwner = head accountOwner
+let accountCidOwner = accountInfoOwner._1
+
+accountAdmin <- query @BankAccount admin
+let accountInfoAdmin = head accountAdmin
+let accountCidAdmin = accountInfoAdmin._1
+
+requestPayment <- submit admin do
+ exerciseCmd proposeMint RequestPayment with
+  account = accountCidAdmin
+  amount = 10000.00
+
+sendPayment <- submit owner do
+    exerciseCmd requestPayment MakePayment with
+     account = accountCidOwner
+
+depoistPayment <- submit admin do
+    exerciseCmd sendPayment Accept
+
+createProperty <- submit admin do
+    createCmd Property with
+     owner = owner
+     price = 10000.00
+     royaltyRate = 0.05
+     priceHistory = [10000.00]
+     authorizer = admin
+     propertyMinter = owner
+     observers = [alice, buyer]
+     mintTime = now
 
 ---- start testing on multi party agreement sale 1----------
 
